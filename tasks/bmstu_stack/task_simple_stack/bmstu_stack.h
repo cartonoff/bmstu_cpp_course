@@ -27,7 +27,7 @@ class stack
 	{
 		if (size_ == capacity_)
 		{
-			// новая capacity
+			// новая  capacity
 			size_t new_cap = (capacity_ == 0) ? 1 : capacity_ + 1;
 
 			// создание нового массива data
