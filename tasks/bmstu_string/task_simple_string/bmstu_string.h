@@ -20,15 +20,30 @@ class simple_basic_string
 	/// Конструктор по умолчанию
 	simple_basic_string() : ptr_(new T[1]{0}), size_(0) {}
 
-	simple_basic_string(size_t size) : ptr_(new T[size + 1]), size_(size) {}
+	// создает строку заданной длины
+	simple_basic_string(size_t size) : ptr_(new T[size + 1]), size_(size)
+	{
+		ptr_[size] = 0;
+	}
 
+	// создание строки через initializer list
 	simple_basic_string(std::initializer_list<T> il)
 		: ptr_(new T[il.size() + 1]), size_(il.size())
 	{
 	}
 
 	/// Конструктор с параметром си-с
-	simple_basic_string(const T* c_str) {}
+	simple_basic_string(const T* c_str)
+	{
+		size_ = strlen_(c_str);
+
+		for (size_t i = 0; i < size_; ++i)
+		{
+			ptr_[i] = c_str[i];
+		}
+
+		ptr_[size_] = 0;
+	}
 
 	/// Конструктор копирования
 	simple_basic_string(const simple_basic_string& other) {}
@@ -91,7 +106,15 @@ class simple_basic_string
 	T* data() { return ptr_; }
 
    private:
-	static size_t strlen_(const T* str) { return 0; }
+	static size_t strlen_(const T* str)
+	{
+		size_t i = 0;
+		while (str[i])
+		{
+			i++;
+		}
+		return i;
+	}
 
 	void clean_() {}
 
