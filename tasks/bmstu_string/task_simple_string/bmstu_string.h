@@ -100,13 +100,17 @@ class simple_basic_string
 	/// Оператор копирующего присваивания си строки
 	simple_basic_string& operator=(const T* c_str)
 	{
+		if (ptr_ == c_str)
+			return *this;
+
 		size_t new_size = strlen_(c_str);
 		T* new_ptr = new T[new_size + 1];
+
 		for (size_t i = 0; i < new_size; i++)
 		{
 			new_ptr[i] = c_str[i];
 		}
-
+		new_ptr[new_size] = T(0);
 		clean_();
 		ptr_ = new_ptr;
 		size_ = new_size;
