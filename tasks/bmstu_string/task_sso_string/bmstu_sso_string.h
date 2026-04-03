@@ -103,6 +103,7 @@ class basic_string
 		else
 		{
 			// ДЛИННЫЙ РЕЖИМ (КУЧА)
+			is_long_ = true;
 			data_.long_str.size = size;
 			data_.long_str.capacity = size;
 			data_.long_str.ptr = new T[size + 1];
