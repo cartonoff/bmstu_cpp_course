@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cctype>
 #include <exception>
 #include <iostream>
 
@@ -21,217 +20,204 @@ class simple_basic_string
 	/// Конструктор по умолчанию
 	simple_basic_string() : ptr_(new T[1]{0}), size_(0) {}
 
-	// создает строку заданной длины
+	// Конструктор с размером
 	simple_basic_string(size_t size) : ptr_(new T[size + 1]), size_(size)
 	{
-		for (size_t i = 0; i < size; ++i)
+		for (size_t i = 0; i < size_; i++)
 		{
 			ptr_[i] = ' ';
 		}
 
-		ptr_[size] = 0;
+		ptr_[size_] = T(0);
 	}
 
-	// создание строки через initializer list
+	// Конструктор через Initializer list
 	simple_basic_string(std::initializer_list<T> il)
 		: ptr_(new T[il.size() + 1]), size_(il.size())
 	{
 		size_t i = 0;
-
-		for (const T& val : il)
+		for (const T& item : il)
 		{
-			ptr_[i] = val;
-			i++;
+			ptr_[i++] = item;
 		}
-
-		ptr_[size_] = 0;
+		ptr_[size_] = T(0);
 	}
 
 	/// Конструктор с параметром си-с
 	simple_basic_string(const T* c_str)
 	{
-		if (c_str == nullptr)
+		size_ = strlen_(c_str);
+		ptr_ = new T[size_ + 1];
+		for (size_t i = 0; i < size_; i++)
 		{
-			size_ = 0;
-			ptr_ = new T[1]{0};
+			ptr_[i] = c_str[i];
 		}
-		else
-		{
-			size_ = strlen_(c_str);
-			ptr_ = new T[size_ + 1];
-
-			for (size_t i = 0; i < size_; ++i)
-			{
-				ptr_[i] = c_str[i];
-			}
-
-			ptr_[size_] = 0;
-		}
+		ptr_[size_] = T(0);
 	}
 
 	/// Конструктор копирования
-	simple_basic_string(const simple_basic_string& other)
-		: ptr_(new T[other.size_ + 1]), size_(other.size_)
+	simple_basic_string(const simple_basic_string& other) : size_(other.size_)
 	{
+		ptr_ = new T[size_ + 1];
 		for (size_t i = 0; i < size_; i++)
 		{
 			ptr_[i] = other.ptr_[i];
 		}
-
-		ptr_[size_] = 0;
+		ptr_[size_] = T(0);
 	}
 
 	/// Перемещающий конструктор
 	simple_basic_string(simple_basic_string&& dying)
 		: ptr_(dying.ptr_), size_(dying.size_)
 	{
-		dying.ptr_ = new T[1]{0};
+		dying.ptr_ = new T[1]{T(0)};
 		dying.size_ = 0;
 	}
 
 	/// Деструктор
-	~simple_basic_string() { delete[] ptr_; }
+	~simple_basic_string() { clean_(); }
 
 	/// Геттер на си-строку
 	const T* c_str() const { return ptr_; }
 
 	size_t size() const { return size_; }
 
+	/// Оператор перемещающего присваивания
+	simple_basic_string& operator=(simple_basic_string&& other)
+	{
+		if (this != &other)
+		{
+			clean_();
+			ptr_ = other.ptr_;
+			size_ = other.size_;
+			other.ptr_ = new T[1]{T(0)};
+			other.size_ = 0;
+		}
+
+		return *this;
+	}
+
 	/// Оператор копирующего присваивания си строки
 	simple_basic_string& operator=(const T* c_str)
 	{
-		clean_();
-
-		size_ = strlen_(c_str);
-		ptr_ = new T[size_ + 1];
-
-		for (size_t i = 0; i < size_; ++i)
+		size_t new_size = strlen_(c_str);
+		T* new_ptr = new T[new_size + 1];
+		for (size_t i = 0; i < new_size; i++)
 		{
-			ptr_[i] = c_str[i];
+			new_ptr[i] = c_str[i];
 		}
-		ptr_[size_] = 0;
 
+		clean_();
+		ptr_ = new_ptr;
+		size_ = new_size;
 		return *this;
 	}
 
 	/// Оператор копирующего присваивания
-	// копирует строку other в this
 	simple_basic_string& operator=(const simple_basic_string& other)
 	{
-		if (this == &other)
-			return *this;
-
-		// очищаем старую память
-		clean_();
-
-		size_ = other.size_;
-
-		ptr_ = new T[size_ + 1];
-
-		// глубокое копирование
-		for (size_t i = 0; i < size_; ++i)
+		if (this != &other)
 		{
-			ptr_[i] = other.ptr_[i];
-		}
+			T* new_ptr = new T[other.size_ + 1];
+			for (size_t i = 0; i < other.size_; i++)
+			{
+				new_ptr[i] = other.ptr_[i];
+			}
 
-		ptr_[size_] = 0;
+			new_ptr[other.size_] = T(0);
 
-		return *this;
-	}
-
-	// Перемещающее присваивание
-	simple_basic_string& operator=(simple_basic_string&& dying) noexcept
-	{
-		if (this != &dying)
-		{
 			clean_();
-
-			size_ = dying.size_;
-			ptr_ = dying.ptr_;
-
-			dying.ptr_ = new T[1]{0};
-			dying.size_ = 0;
+			ptr_ = new_ptr;
+			size_ = other.size_;
 		}
 
 		return *this;
 	}
 
-	// сложение строк, перегрузка оператора +
 	friend simple_basic_string<T> operator+(const simple_basic_string<T>& left,
 											const simple_basic_string<T>& right)
 	{
-		size_t new_size = left.size_ + right.size_;
+		simple_basic_string<T> result(left.size_ + right.size_);
 
-		simple_basic_string<T> result(new_size);
-
-		for (size_t i = 0; i < left.size_; ++i)
+		size_t k = 0;
+		for (size_t i = 0; i < left.size_; i++)
 		{
-			result.ptr_[i] = left.ptr_[i];
+			result.ptr_[k++] = left.ptr_[i];
+		}
+		for (size_t i = 0; i < right.size_; i++)
+		{
+			result.ptr_[k++] = right.ptr_[i];
 		}
 
-		for (size_t i = 0; i < right.size_; ++i)
-		{
-			result.ptr_[left.size_ + i] = right.ptr_[i];
-		}
-
-		result.ptr_[new_size] = 0;
+		result.ptr_[result.size_] = T(0);
 
 		return result;
 	}
 
-	// вывод строки в поток
 	template <typename S>
 	friend S& operator<<(S& os, const simple_basic_string& obj)
 	{
-		os << obj.c_str();
+		for (size_t i = 0; i < obj.size_; i++)
+		{
+			os << obj.ptr_[i];
+		}
 
 		return os;
 	}
 
-	// оператор ввода
 	template <typename S>
 	friend S& operator>>(S& is, simple_basic_string& obj)
 	{
-		delete[] obj.ptr_;
-		obj.ptr_ = new T[1]{0};
-		obj.size_ = 0;
+		obj.clean_();
+		obj.ptr_ = new T[1]{T(0)};
 
-		T symbol;
-
-		if (!(is >> symbol))
+		T ch;
+		while (is.get(ch))
 		{
-			return is;
+			obj += ch;
 		}
 
-		obj += symbol;
-
-		while (is.get(symbol))
-		{
-			obj += symbol;
-		}
 		return is;
 	}
 
 	simple_basic_string& operator+=(const simple_basic_string& other)
 	{
-		return *this;
-	}
-
-	// добавление буквы в конец строки
-	simple_basic_string& operator+=(T symbol)
-	{
-		T* new_ptr = new T[size_ + 2];
+		size_t new_size = size_ + other.size_;
+		T* new_ptr = new T[new_size + 1];
 
 		for (size_t i = 0; i < size_; ++i)
 		{
 			new_ptr[i] = ptr_[i];
 		}
 
-		new_ptr[size_] = symbol;
-		new_ptr[size_ + 1] = 0;
-		delete[] ptr_;
+		for (size_t i = 0; i < other.size_; ++i)
+		{
+			new_ptr[i] = other.ptr_[i];
+		}
+
+		new_ptr[new_size] = T(0);
+
+		clean_();
 		ptr_ = new_ptr;
-		size_++;
+		size_ = new_size;
+
+		return *this;
+	}
+
+	simple_basic_string& operator+=(T symbol)
+	{
+		size_t new_size = size_ + 1;
+		T* new_ptr = new T[new_size + 1];
+
+		for (size_t i = 0; i < size_; i++)
+		{
+			new_ptr[i] = ptr_[i];
+		}
+		new_ptr[size_] = symbol;
+		new_ptr[new_size] = T(0);
+
+		ptr_ = new_ptr;
+		size_ = new_size;
 
 		return *this;
 	}
@@ -245,17 +231,18 @@ class simple_basic_string
    private:
 	static size_t strlen_(const T* str)
 	{
-		size_t i = 0;
-		while (str[i])
+		size_t len = 0;
+		while (str != nullptr && str[len] != T(0))
 		{
-			i++;
+			++len;
 		}
-		return i;
+		return len;
 	}
 
 	void clean_()
 	{
 		delete[] ptr_;
+		ptr_ = nullptr;
 		size_ = 0;
 	}
 
