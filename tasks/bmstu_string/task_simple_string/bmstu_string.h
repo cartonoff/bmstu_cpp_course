@@ -97,7 +97,7 @@ class simple_basic_string
 		return *this;
 	}
 
-	/// Оператор копирующего присваивания си строки
+	/// Оператор копирующего присваивания си  строки
 	simple_basic_string& operator=(const T* c_str)
 	{
 		if (ptr_ == c_str)
