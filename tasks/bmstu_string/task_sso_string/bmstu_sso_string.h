@@ -150,6 +150,7 @@ class basic_string
 	/// Конструктор от Си-строки
 	basic_string(const T* c_str)
 	{
+		std::cout << sizeof(wchar_t);
 		if (!c_str)
 		{
 			is_long_ = false;
@@ -485,8 +486,39 @@ class basic_string
 		return *this;
 	}
 
+	basic_string& reverse()
+	{
+		size_t this_size = size();
+
+		for (size_t i = 0; i < this_size / 2; ++i)
+		{
+			std::swap((*this)[i], (*this)[this_size - 1 - i]);
+		}
+
+		return *this;
+	}
+
+	friend bool operator==(const basic_string<T>& left,
+						   const basic_string<T>& right)
+	{
+		if (left.size() != right.size())
+			return false;
+
+		for (size_t i = 0; i < left.size(); ++i)
+		{
+			if (left[i] != right[i])
+				return false;
+		}
+		return true;
+	}
+
 	/// Прямой и быстрый доступ по индексу
 	T& operator[](size_t index) noexcept { return get_ptr()[index]; }
+
+	const T& operator[](size_t index) const noexcept
+	{
+		return get_ptr()[index];
+	}
 
 	/// Безопасный доступ по индексу
 	T& at(size_t index)
@@ -496,7 +528,14 @@ class basic_string
 		return get_ptr()[index];
 	}
 
-	T* data() { return nullptr; }
+	const T& at(size_t index) const
+	{
+		if (index >= size())
+			std::out_of_range("Index out of range!");
+		return get_ptr()[index];
+	}
+
+	T* data() { return *data_; }
 
    private:
 	static size_t strlen_(const T* str)

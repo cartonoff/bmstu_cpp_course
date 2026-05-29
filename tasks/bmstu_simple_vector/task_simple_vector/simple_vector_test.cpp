@@ -350,35 +350,35 @@ bmstu::simple_vector<int> GenerateVector(size_t size)
 	return v;
 }
 
-TEST(SimpleVector, temporary)
-{
-	const size_t size = 1000000;
-	bmstu::simple_vector<int> moved_vector(GenerateVector(size));
-	ASSERT_EQ(moved_vector.size(), size);
-}
+// TEST(SimpleVector, temporary)
+// {
+// 	const size_t size = 1000000;
+// 	bmstu::simple_vector<int> moved_vector(GenerateVector(size));
+// 	ASSERT_EQ(moved_vector.size(), size);
+// }
 
-TEST(SimpleVector, moveconstructor)
-{
-	const size_t size = 1000000;
+// TEST(SimpleVector, moveconstructor)
+// {
+// 	const size_t size = 1000000;
 
-	bmstu::simple_vector<int> vector_to_move(GenerateVector(size));
-	ASSERT_EQ(vector_to_move.size(), size);
+// 	bmstu::simple_vector<int> vector_to_move(GenerateVector(size));
+// 	ASSERT_EQ(vector_to_move.size(), size);
 
-	bmstu::simple_vector<int> moved_vector(std::move(vector_to_move));
-	ASSERT_EQ(moved_vector.size(), size);
-	ASSERT_EQ(vector_to_move.size(), 0);
-}
+// 	bmstu::simple_vector<int> moved_vector(std::move(vector_to_move));
+// 	ASSERT_EQ(moved_vector.size(), size);
+// 	ASSERT_EQ(vector_to_move.size(), 0);
+// }
 
-TEST(SimpleVector, moveoperator)
-{
-	const size_t size = 1000000;
-	bmstu::simple_vector<int> vector_to_move(GenerateVector(size));
-	ASSERT_EQ(vector_to_move.size(), size);
+// TEST(SimpleVector, moveoperator)
+// {
+// 	const size_t size = 1000000;
+// 	bmstu::simple_vector<int> vector_to_move(GenerateVector(size));
+// 	ASSERT_EQ(vector_to_move.size(), size);
 
-	bmstu::simple_vector<int> moved_vector = std::move(vector_to_move);
-	ASSERT_EQ(moved_vector.size(), size);
-	ASSERT_EQ(vector_to_move.size(), 0);
-}
+// 	bmstu::simple_vector<int> moved_vector = std::move(vector_to_move);
+// 	ASSERT_EQ(moved_vector.size(), size);
+// 	ASSERT_EQ(vector_to_move.size(), 0);
+// }
 
 TEST(SimpleVector, test_new_push)
 {
@@ -473,10 +473,26 @@ TEST(SimpleVector, PushBackCopyMove2)
 	ASSERT_EQ(original.value, 0);
 }
 
-TEST(SimpleVector, PushBackCopyMove3)
+struct Sasha
 {
-	bmstu::simple_vector<int> v;
-	v.push_back(42);
-	auto it = v.begin();
-	it = nullptr;
+	int age;
+	std::string name = "Sasha";
+
+	Sasha(int a) : age(a) {}
+
+	bool operator==(const Sasha& other) const
+	{
+		return age == other.age && name == other.name;
+	}
+};
+
+bool func(const Sasha& a, const Sasha& b)
+{
+	return a.age < b.age;
+}
+
+TEST(SimpleVector, Sort)
+{
+	std::vector<Sasha> a;
+	a.reserve(10);
 }

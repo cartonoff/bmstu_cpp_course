@@ -161,6 +161,7 @@ class simple_basic_string
 	template <typename S>
 	friend S& operator<<(S& os, const simple_basic_string& obj)
 	{
+		os.imbue(std::locale(""));
 		for (size_t i = 0; i < obj.size_; i++)
 		{
 			os << obj.ptr_[i];

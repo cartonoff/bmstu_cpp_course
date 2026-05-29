@@ -376,3 +376,15 @@ TEST(SSOStringTest, SSOCapacity)
 	ASSERT_FALSE(long_str.is_using_sso());
 	ASSERT_GE(long_str.capacity(), long_str.size());
 }
+
+TEST(SSOStringTest, SSOTests)
+{
+	bmstu::string short_str("1234");
+	short_str.reverse();
+	bmstu::string exp("4321");
+	bmstu::string exp2("1234");
+	ASSERT_EQ(short_str, exp);
+	short_str.reverse();
+	short_str.reverse().reverse();
+	ASSERT_EQ(short_str, exp2);
+}

@@ -1,6 +1,7 @@
 // #include <gtest/gtest.h>
 // #include "bmstu_string.h"
 
+// #include <fstream>
 // #include <sstream>
 // #include "bmstu_string.h"
 
@@ -288,4 +289,12 @@
 // 	ASSERT_EQ(a_str[0], L'С');
 // 	ASSERT_EQ(a_str[1], L'Т');
 // 	ASSERT_EQ(a_str[a_str.size() - 1], L'Г');
+// }
+
+// TEST(StringTest, Eggplant)
+// {
+// 	bmstu::wstring a_str(L"💧💧💧💧💧");
+// 	std::wofstream file("eggplant.txt");
+
+// 	file << a_str;
 // }

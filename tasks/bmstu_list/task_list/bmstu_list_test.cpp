@@ -536,3 +536,46 @@ TEST(BidirectLinkedListTests, from_vector)
 										"string7"s, "end_string"s}),
 			  my_vec);
 }
+
+/*
+struct I
+{
+	I i;
+};
+
+struct I
+{
+	I *i;
+};
+*/
+
+struct A
+{
+	A() { std::cout << "A()\n"; }
+	~A() { std::cout << "~A()\n"; }
+	virtual void func() { std::cout << "A fync()\n"; }
+};
+
+struct B : virtual public A
+{
+	B() { std::cout << "B()\n"; }
+	~B() { std::cout << "~B()\n"; }
+};
+
+struct C : virtual public A
+{
+	C() { std::cout << "C()\n"; }
+	~C() { std::cout << "~C()\n"; }
+};
+
+struct D : public C, public B
+{
+	D() { std::cout << "D()\n"; }
+	~D() { std::cout << "~D()\n"; }
+};
+
+TEST(BidirectLinkedListTests, Abstract)
+{
+	D d;
+	d.func();
+}
