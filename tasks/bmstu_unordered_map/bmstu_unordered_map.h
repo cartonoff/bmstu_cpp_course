@@ -1,29 +1,93 @@
 #pragma once
+
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <functional>
+#include <iterator>
 #include <list>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
 #include "fast_streebog.h"
 
 namespace bmstu
 {
-template <typename item>
-struct equal_to
+
+namespace detail
 {
-	bool operator()(const item& lhs, const item& rhs) const
-	{
-		return lhs == rhs;
-	}
+
+template <typename T, typename = void>
+struct has_raw_bytes_impl : std::false_type
+{
 };
+
+template <typename T>
+struct has_raw_bytes_impl<
+	T,
+	std::void_t<decltype(std::declval<const T&>().rawBytes())>>
+	: std::is_convertible<decltype(std::declval<const T&>().rawBytes()),
+						  std::span<const uint8_t>>
+{
+};
+
+template <typename T, typename = void>
+struct has_equality_operator_impl : std::false_type
+{
+};
+
+template <typename T>
+struct has_equality_operator_impl<
+	T,
+	std::void_t<decltype(std::declval<const T&>() == std::declval<const T&>())>>
+	: std::is_convertible<decltype(std::declval<const T&>() ==
+								   std::declval<const T&>()),
+						  bool>
+{
+};
+
+}  // namespace detail
+
+template <typename T>
+struct has_raw_bytes : detail::has_raw_bytes_impl<T>
+{
+};
+
+template <typename T>
+inline constexpr bool has_raw_bytes_v = has_raw_bytes<T>::value;
+
+template <typename T>
+struct has_equality_operator : detail::has_equality_operator_impl<T>
+{
+};
+
+template <typename T>
+inline constexpr bool has_equality_operator_v = has_equality_operator<T>::value;
 
 template <typename K>
-struct hash
+struct streebog_hash
 {
-	size_t operator()(const K& key) const
+	static_assert(has_raw_bytes_v<K> || std::is_trivially_copyable_v<K>,
+				  "bmstu::streebog_hash: key type must be trivially-copyable "
+				  "or provide `std::span<const uint8_t> rawBytes() const`.");
+
+	std::size_t operator()(const K& key) const noexcept
 	{
 		uint8_t digest[32];
-		streebog_hash_256(reinterpret_cast<const uint8_t*>(&key), sizeof(K),
-						  digest);
+		if constexpr (has_raw_bytes_v<K>)
+		{
+			auto bytes = key.rawBytes();
+			streebog_hash_256(bytes.data(), bytes.size(), digest);
+		}
+		else
+		{
+			streebog_hash_256(reinterpret_cast<const uint8_t*>(&key), sizeof(K),
+							  digest);
+		}
 		std::size_t result = 0;
 		std::memcpy(&result, digest, sizeof(std::size_t));
 		return result;
@@ -31,167 +95,109 @@ struct hash
 };
 
 template <>
-struct hash<const char*>
+struct streebog_hash<std::string>
 {
-	size_t operator()(const char* str) const
+	std::size_t operator()(const std::string& key) const noexcept
 	{
 		uint8_t digest[32];
-		size_t string_size = strlen(str);
-		streebog_hash_256(reinterpret_cast<const uint8_t*>(str), string_size,
-						  digest);
+		streebog_hash_256(reinterpret_cast<const uint8_t*>(key.data()),
+						  key.size(), digest);
 		std::size_t result = 0;
 		std::memcpy(&result, digest, sizeof(std::size_t));
-		return result;
-	}
-};
-
-template <>
-struct hash<size_t>
-{
-	size_t operator()(const size_t& key) const { return key; }
-};
-
-template <>
-struct hash<int>
-{
-	size_t operator()(const int& key) const { return static_cast<size_t>(key); }
-};
-
-template <>
-struct hash<char>
-{
-	size_t operator()(const char& key) const
-	{
-		return static_cast<size_t>(key);
-	}
-};
-
-template <>
-struct hash<double>
-{
-	size_t operator()(const double& key) const
-	{
-		size_t result;
-		std::memcpy(&result, &key, sizeof(double));
 		return result;
 	}
 };
 
 template <typename K,
 		  typename V,
-		  typename Hash = hash<K>,
-		  typename KeyEqual = equal_to<K>>
+		  typename Hash = streebog_hash<K>,
+		  typename Equal = std::equal_to<K>>
 class unordered_map
 {
+	static_assert(has_equality_operator_v<K>,
+				  "bmstu::unordered_map: key type must provide `operator==`.");
+
    public:
-	using size_type = size_t;
 	using key_type = K;
 	using mapped_type = V;
-	// Пара ключ-значение, const для невозможности изменения ключа
 	using value_type = std::pair<const K, V>;
+	using size_type = std::size_t;
 
    private:
-	// число дефолтных бакетов
-	static constexpr size_type DEFAULT_BUCKET_COUNT = 7;
-	// фактор максимальной загрузки
+	static constexpr size_type DEFAULT_BUCKET_COUNT = 16;
 	static constexpr double MAX_LOAD_FACTOR = 0.75;
-
-	size_t bucket_for(const key_type& key) const
-	{
-		return hash_(key) % buckets_.size();
-	}
 
 	using bucket_type = std::list<value_type>;
 
-	void rehash(size_t new_bucket_count)
+	std::vector<bucket_type> buckets_;
+	size_type size_ = 0;
+	Hash hasher_;
+	Equal equal_;
+
+	size_type bucket_for(const K& key) const
 	{
-		std::vector<bucket_type> next(new_bucket_count);
-		for (auto& bkt : buckets_)
+		if (buckets_.empty())
+			return 0;
+		return hasher_(key) % buckets_.size();
+	}
+
+	void rehash(size_type new_count)
+	{
+		if (new_count == 0)
+			new_count = 1;
+		std::vector<bucket_type> new_buckets(new_count);
+		for (auto& bucket : buckets_)
 		{
-			for (auto& pair : bkt)
+			for (auto& kv : bucket)
 			{
-				size_type idx = hash_(pair.first) % new_bucket_count;
-				next[idx].push_back(std::move(pair));
+				size_type idx = hasher_(kv.first) % new_count;
+				new_buckets[idx].push_back(std::move(kv));
 			}
 		}
-		buckets_ = std::move(next);
+		buckets_ = std::move(new_buckets);
 	}
-
-	std::vector<bucket_type> buckets_;
-	size_type size_;
-	Hash hash_;
-	KeyEqual equal_;
 
    public:
-	explicit unordered_map(size_type bucket_count = DEFAULT_BUCKET_COUNT)
-		: buckets_(bucket_count), size_(0)
+	struct iterator
 	{
-	}
-
-	// не реализуется по правилу нуля (отдается компилятору)
-	// конструктор копирования
-	unordered_map(const unordered_map&) = default;
-	// конструктор перемещения
-	unordered_map(unordered_map&&) = default;
-	// оператор копирующего присваивания
-	unordered_map& operator=(const unordered_map&) = default;
-	// оператор перемещающего присваивания
-	unordered_map& operator=(unordered_map&&) = default;
-	// деструктор
-	~unordered_map() = default;
-
-	class iterator
-	{
-	   public:
 		using iterator_category = std::forward_iterator_tag;
 		using value_type = unordered_map::value_type;
+		using difference_type = std::ptrdiff_t;
 		using pointer = value_type*;
 		using reference = value_type&;
-		using difference_type = std::ptrdiff_t;
+
+		std::vector<bucket_type>* buckets_ = nullptr;
+		size_type bucket_idx_ = 0;
+		typename bucket_type::iterator list_it_;
 
 		iterator() = default;
 
-		// Итератор должен знать о buckets_ родительского мапа, чтобы корректно
-		// переходить к следующему бакету
-		iterator(std::vector<bucket_type>* buckets_ptr,
-				 size_type bucket_index,
-				 typename bucket_type::iterator list_it)
-			: buckets_ptr_(buckets_ptr),
-			  bucket_index_(bucket_index),
-			  list_it_(list_it) {};
-
-		iterator(const iterator& other) = default;
-		iterator(iterator&& other) noexcept = default;
-
-		reference operator*() const { return *list_it_; }
-
-		pointer operator->() const { return &(*list_it_); }
-
-		friend pointer to_address(const iterator& it) noexcept
+		iterator(std::vector<bucket_type>* buckets,
+				 size_type idx,
+				 typename bucket_type::iterator it)
+			: buckets_(buckets), bucket_idx_(idx), list_it_(it)
 		{
-			return &(*it.list_it_);
 		}
 
-		iterator& operator=(const iterator& other) = default;
+		reference operator*() const { return *list_it_; }
+		pointer operator->() const { return &(*list_it_); }
 
-		iterator& operator=(iterator&& other) noexcept = default;
-
-#pragma region Operators
 		iterator& operator++()
 		{
+			if (!buckets_)
+				return *this;
 			++list_it_;
-			while (bucket_index_ < buckets_ptr_->size() &&
-				   list_it_ == (*buckets_ptr_)[bucket_index_].end())
+			while (bucket_idx_ < buckets_->size() &&
+				   list_it_ == (*buckets_)[bucket_idx_].end())
 			{
-				++bucket_index_;
-				if (bucket_index_ < buckets_ptr_->size())
-					list_it_ = (*buckets_ptr_)[bucket_index_].begin();
+				++bucket_idx_;
+				if (bucket_idx_ < buckets_->size())
+				{
+					list_it_ = (*buckets_)[bucket_idx_].begin();
+				}
 			}
 			return *this;
 		}
-
-		// реализуем потом для bidirectional
-		iterator& operator--() = delete;
 
 		iterator operator++(int)
 		{
@@ -200,57 +206,105 @@ class unordered_map
 			return tmp;
 		}
 
-		iterator operator--(int) = delete;
-
-		// Оператор приведения к bool
-		explicit operator bool() const { return buckets_ptr_ != nullptr; }
-
 		bool operator==(const iterator& o) const
 		{
-			bool at_end =
-				!buckets_ptr_ || bucket_index_ >= buckets_ptr_->size();
-			bool o_at_end =
-				!o.buckets_ptr_ || o.bucket_index_ >= o.buckets_ptr_->size();
-
+			bool at_end = !buckets_ || bucket_idx_ >= buckets_->size();
+			bool o_at_end = !o.buckets_ || o.bucket_idx_ >= o.buckets_->size();
 			if (at_end && o_at_end)
-			{
 				return true;
-			}
 			if (at_end != o_at_end)
-			{
 				return false;
-			}
-			return buckets_ptr_ == o.buckets_ptr_ &&
-				   bucket_index_ == o.bucket_index_ && list_it_ == o.list_it_;
+			return buckets_ == o.buckets_ && bucket_idx_ == o.bucket_idx_ &&
+				   list_it_ == o.list_it_;
 		}
 
 		bool operator!=(const iterator& o) const { return !(*this == o); }
+	};
 
-		iterator& operator=(std::nullptr_t) noexcept
+	struct const_iterator
+	{
+		using iterator_category = std::forward_iterator_tag;
+		using value_type = const unordered_map::value_type;
+		using difference_type = std::ptrdiff_t;
+		using pointer = const value_type*;
+		using reference = const value_type&;
+
+		const std::vector<bucket_type>* buckets_ = nullptr;
+		size_type bucket_idx_ = 0;
+		typename bucket_type::const_iterator list_it_;
+
+		const_iterator() = default;
+
+		const_iterator(const std::vector<bucket_type>* buckets,
+					   size_type idx,
+					   typename bucket_type::const_iterator it)
+			: buckets_(buckets), bucket_idx_(idx), list_it_(it)
 		{
-			buckets_ptr_ = nullptr;
+		}
+
+		const_iterator(const iterator& it)
+			: buckets_(it.buckets_),
+			  bucket_idx_(it.bucket_idx_),
+			  list_it_(it.list_it_)
+		{
+		}
+
+		reference operator*() const { return *list_it_; }
+		pointer operator->() const { return &(*list_it_); }
+
+		const_iterator& operator++()
+		{
+			if (!buckets_)
+				return *this;
+			++list_it_;
+			while (bucket_idx_ < buckets_->size() &&
+				   list_it_ == (*buckets_)[bucket_idx_].end())
+			{
+				++bucket_idx_;
+				if (bucket_idx_ < buckets_->size())
+				{
+					list_it_ = (*buckets_)[bucket_idx_].begin();
+				}
+			}
 			return *this;
 		}
 
-#pragma endregion
-	   private:
-		std::vector<bucket_type>* buckets_ptr_ = nullptr;
-		size_type bucket_index_ = 0;
-		typename bucket_type::iterator list_it_;
+		const_iterator operator++(int)
+		{
+			const_iterator tmp = *this;
+			++(*this);
+			return tmp;
+		}
+
+		bool operator==(const const_iterator& o) const
+		{
+			bool at_end = !buckets_ || bucket_idx_ >= buckets_->size();
+			bool o_at_end = !o.buckets_ || o.bucket_idx_ >= o.buckets_->size();
+			if (at_end && o_at_end)
+				return true;
+			if (at_end != o_at_end)
+				return false;
+			return buckets_ == o.buckets_ && bucket_idx_ == o.bucket_idx_ &&
+				   list_it_ == o.list_it_;
+		}
+
+		bool operator!=(const const_iterator& o) const { return !(*this == o); }
 	};
 
-#pragma region HASHPOLICY
-
-	double load_factor() const
+	explicit unordered_map(size_type bucket_count = DEFAULT_BUCKET_COUNT)
+		: buckets_(bucket_count > 0 ? bucket_count : 1)
 	{
-		return static_cast<double>(size_) /
-			   static_cast<double>(buckets_.size());
 	}
-	size_type bucket_count() const { return buckets_.size(); }
+
+	unordered_map(const unordered_map&) = default;
+	unordered_map(unordered_map&&) = default;
+	unordered_map& operator=(const unordered_map&) = default;
+	unordered_map& operator=(unordered_map&&) = default;
+	~unordered_map() = default;
 
 	iterator begin()
 	{
-		for (size_t i = 0; i < buckets_.size(); ++i)
+		for (size_type i = 0; i < buckets_.size(); ++i)
 		{
 			if (!buckets_[i].empty())
 			{
@@ -260,14 +314,36 @@ class unordered_map
 		return end();
 	}
 
-	iterator end()
+	iterator end() { return iterator(&buckets_, buckets_.size(), {}); }
+
+	const_iterator begin() const
 	{
-		return iterator(&buckets_, buckets_.size(),
-						typename bucket_type::iterator());
+		for (size_type i = 0; i < buckets_.size(); ++i)
+		{
+			if (!buckets_[i].empty())
+			{
+				return const_iterator(&buckets_, i, buckets_[i].begin());
+			}
+		}
+		return end();
 	}
+
+	const_iterator end() const
+	{
+		return const_iterator(&buckets_, buckets_.size(), {});
+	}
+
+	const_iterator cbegin() const { return begin(); }
+	const_iterator cend() const { return end(); }
+
+	size_type size() const noexcept { return size_; }
+
+	bool empty() const noexcept { return size_ == 0; }
 
 	iterator find(const K& key)
 	{
+		if (buckets_.empty())
+			return end();
 		size_type idx = bucket_for(key);
 		for (auto it = buckets_[idx].begin(); it != buckets_[idx].end(); ++it)
 		{
@@ -279,54 +355,72 @@ class unordered_map
 		return end();
 	}
 
-	iterator insert(const value_type& value)
+	const_iterator find(const K& key) const
 	{
-		auto it = find(value.first);
-		if (it != end())
-		{
-			it->second = value.second;	// обновляем ключ
-			return it;
-		}
-
-		if (load_factor() > MAX_LOAD_FACTOR)
-		{
-			rehash(bucket_count() * 2);
-		}
-		size_type idx = bucket_for(value.first);
-		buckets_[idx].push_front(value);
-		++size_;
-		return iterator(&buckets_, idx, buckets_[idx].begin());
-	}
-
-	V& operator[](const K& key)
-	{
-		auto it = find(key);
-		if (it != end())
-		{
-			return it->second;
-		}
-		else
-		{
-			if (load_factor() > MAX_LOAD_FACTOR)
-			{
-				rehash(bucket_count() * 2);
-			}
-			size_type idx = bucket_for(key);
-			buckets_[idx].emplace_back(key, V());
-			++size_;
-			return buckets_[idx].back().second;
-		}
-	}
-
-	bool erase(const K& key)
-	{
+		if (buckets_.empty())
+			return end();
 		size_type idx = bucket_for(key);
-		auto& bucket = buckets_[idx];
-		for (auto it = bucket.begin(); it != bucket.end(); ++it)
+		for (auto it = buckets_[idx].begin(); it != buckets_[idx].end(); ++it)
 		{
 			if (equal_(it->first, key))
 			{
-				bucket.erase(it);
+				return const_iterator(&buckets_, idx, it);
+			}
+		}
+		return end();
+	}
+
+	bool contains(const K& key) const { return find(key) != end(); }
+
+	V& at(const K& key)
+	{
+		auto it = find(key);
+		if (it == end())
+		{
+			throw std::out_of_range("bmstu::unordered_map::at: key not found");
+		}
+		return it->second;
+	}
+
+	const V& at(const K& key) const
+	{
+		auto it = find(key);
+		if (it == end())
+		{
+			throw std::out_of_range("bmstu::unordered_map::at: key not found");
+		}
+		return it->second;
+	}
+
+	std::pair<iterator, bool> insert(const value_type& kv)
+	{
+		auto it = find(kv.first);
+		if (it != end())
+		{
+			return {it, false};
+		}
+		if (load_factor() >= MAX_LOAD_FACTOR)
+		{
+			rehash(buckets_.size() * 2);
+		}
+		size_type idx = bucket_for(kv.first);
+		buckets_[idx].push_front(kv);
+		++size_;
+		return {iterator(&buckets_, idx, buckets_[idx].begin()), true};
+	}
+
+	V& operator[](const K& key) { return insert({key, V{}}).first->second; }
+
+	bool erase(const K& key)
+	{
+		if (buckets_.empty())
+			return false;
+		size_type idx = bucket_for(key);
+		for (auto it = buckets_[idx].begin(); it != buckets_[idx].end(); ++it)
+		{
+			if (equal_(it->first, key))
+			{
+				buckets_[idx].erase(it);
 				--size_;
 				return true;
 			}
@@ -334,7 +428,32 @@ class unordered_map
 		return false;
 	}
 
-#pragma endregion
+	void clear()
+	{
+		for (auto& bucket : buckets_)
+		{
+			bucket.clear();
+		}
+		size_ = 0;
+	}
+
+	double load_factor() const
+	{
+		return buckets_.empty() ? 0.0
+								: static_cast<double>(size_) / buckets_.size();
+	}
+
+	size_type bucket_count() const { return buckets_.size(); }
+
+	void reserve(size_type count)
+	{
+		size_type required_buckets =
+			static_cast<size_type>(count / MAX_LOAD_FACTOR) + 1;
+		if (required_buckets > buckets_.size())
+		{
+			rehash(required_buckets);
+		}
+	}
 };
 
 }  // namespace bmstu
