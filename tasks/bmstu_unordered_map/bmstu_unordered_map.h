@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -21,6 +22,25 @@ namespace bmstu
 namespace detail
 {
 
+template <typename Buffer, typename = void>
+struct is_byte_buffer_impl : std::false_type
+{
+};
+
+template <typename Buffer>
+struct is_byte_buffer_impl<
+	Buffer,
+	std::void_t<decltype(std::declval<const Buffer&>().data()),
+				decltype(std::declval<const Buffer&>().size())>>
+	: std::bool_constant<
+		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<
+							 decltype(std::declval<const Buffer&>().data())>>,
+						 uint8_t> &&
+		  std::is_convertible_v<decltype(std::declval<const Buffer&>().size()),
+								std::size_t>>
+{
+};
+
 template <typename T, typename = void>
 struct has_raw_bytes_impl : std::false_type
 {
@@ -30,8 +50,7 @@ template <typename T>
 struct has_raw_bytes_impl<
 	T,
 	std::void_t<decltype(std::declval<const T&>().rawBytes())>>
-	: std::is_convertible<decltype(std::declval<const T&>().rawBytes()),
-						  std::span<const uint8_t>>
+	: is_byte_buffer_impl<decltype(std::declval<const T&>().rawBytes())>
 {
 };
 
@@ -73,24 +92,58 @@ struct streebog_hash
 {
 	static_assert(has_raw_bytes_v<K> || std::is_trivially_copyable_v<K>,
 				  "bmstu::streebog_hash: key type must be trivially-copyable "
-				  "or provide `std::span<const uint8_t> rawBytes() const`.");
+				  "or provide `rawBytes() const` returning a byte buffer with "
+				  "`data()`/`size()` (e.g. std::span<const uint8_t> or "
+				  "std::vector<uint8_t>). ");
 
 	std::size_t operator()(const K& key) const noexcept
 	{
-		uint8_t digest[32];
-		if constexpr (has_raw_bytes_v<K>)
+		// здесь мы делаем проверку на то, целое это число (или char, или еще
+		// что-то) итд и делаем абсолютно то же самое, что и в первой заглушке
+		if constexpr (std::is_enum_v<K> || std::is_integral_v<K>)
 		{
-			auto bytes = key.rawBytes();
-			streebog_hash_256(bytes.data(), bytes.size(), digest);
+			return static_cast<std::size_t>(key);
+		}
+
+		// здесь начинается самое интересное: мы делаем проверку на то, дробное
+		// это число или нет, и вот с его обработкой мне пришлось помучаться,
+		// потому что нигде норм инфы как это сделать конечно же нет
+		else if constexpr (std::is_floating_point_v<K>)
+		{
+			K k = key;
+			if (k < 0)
+			{
+				k = -k;
+			}
+			// в двух словах мы переводим байты дробного числа double в
+			// переменную bits и СРЕЗАЕМ ему 15 последних битов, чтобы уменьшить
+			// цифровой шум (погрешность компьютера) и заставить его нормально
+			// выдавать числа
+			std::size_t bits = 0;
+			std::memcpy(&bits, &k, std::min(sizeof(K), sizeof(std::size_t)));
+			return bits >> 15;
+			// этот способ адекватно работает для положительных чисел (в начале
+			// мы по сути убираем минус), меня он уже не стал допытывать, как
+			// сделать чтобы и с минусом работало, НО может заставить вас, он
+			// мне сказал это в конце ("для будущих оставлю задание")
 		}
 		else
 		{
-			streebog_hash_256(reinterpret_cast<const uint8_t*>(&key), sizeof(K),
-							  digest);
+			uint8_t digest[32];
+			if constexpr (has_raw_bytes_v<K>)
+			{
+				auto bytes = key.rawBytes();
+				streebog_hash_256(bytes.data(), bytes.size(), digest);
+			}
+			else
+			{
+				streebog_hash_256(reinterpret_cast<const uint8_t*>(&key),
+								  sizeof(K), digest);
+			}
+			std::size_t result = 0;
+			std::memcpy(&result, digest, sizeof(std::size_t));
+			return result;
 		}
-		std::size_t result = 0;
-		std::memcpy(&result, digest, sizeof(std::size_t));
-		return result;
 	}
 };
 
@@ -108,6 +161,26 @@ struct streebog_hash<std::string>
 	}
 };
 
+// отличный пример, как можно базово перегрузить шаблон нашим типом size_t
+// тут мы по сути делаем заглушку, чтобы из ключа хэш не делался, как в обычном
+// streebog_hash, а чтобы эта функция возвращала обычный ключ
+// тем самым если в обычной формуле (idx = hash(key) % bucket_size) индекс в map
+// рассчитывается так, то мы делаем, чтобы idx рассчитывался так:
+// idx = key % bucket_size
+
+// template <>
+// struct streebog_hash<std::size_t>
+// {
+// 	std::size_t operator()(const std::size_t& key) const noexcept
+// 	{
+// 		return key;
+// 	}
+// };
+
+// как первая зашлушка пойдет, но потом он начнет вам писать другие типы (char,
+// wchar_t итд) чтобы сделать универсальную проверку перейдем в базовую
+// шаблонную функцию streebog_hash (строка 101)
+
 template <typename K,
 		  typename V,
 		  typename Hash = streebog_hash<K>,
@@ -124,7 +197,7 @@ class unordered_map
 	using size_type = std::size_t;
 
    private:
-	static constexpr size_type DEFAULT_BUCKET_COUNT = 16;
+	static constexpr size_type DEFAULT_BUCKET_COUNT = 7;
 	static constexpr double MAX_LOAD_FACTOR = 0.75;
 
 	using bucket_type = std::list<value_type>;

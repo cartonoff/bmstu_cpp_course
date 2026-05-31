@@ -270,3 +270,63 @@ TEST(UnorderedMapTest, StreebogHashDistribution)
 		static_cast<double>(m.size()) / static_cast<double>(m.bucket_count());
 	EXPECT_LE(avg, 2.0);
 }
+
+// структура машины обычная
+struct Car
+{
+	std::string vin;
+	std::string model;
+	double weight;
+
+	// делаем оператор == для того, чтобы работал
+	// static_assert(has_equality_operator_v<K>,
+	//			  "bmstu::unordered_map: key type must provide `operator==`.");
+	bool operator==(const Car& other) const
+	{
+		return vin == other.vin && model == other.model &&
+			   weight == other.weight;
+	}
+
+	// делаем rawBytes для того, чтобы работал SFINAE
+	std::vector<uint8_t> rawBytes() const
+	{
+		// буфер
+		std::string raw = vin + model + std::to_string(weight);
+		return std::vector<uint8_t>(raw.begin(), raw.end());
+	}
+};
+
+TEST(UnorderedMapTest, CarsDict)
+{
+	// мап из каров
+	bmstu::unordered_map<Car, std::string> cars;
+	cars[Car{"body1", "gto", 2500}] = "SportCar";
+	cars[Car{"body2", "duster", 1850}] = "CrossOver";
+	cars[Car{"body3", "2111", 1850}] = "Universal";
+
+	// изначально все типы в unordered_map записываются не по порядку
+	// Ершов просит сделать чтобы они выводились по порядку
+
+	// bmstu::unordered_map<std::size_t, std::string> ids;
+	// ids[1] = "Hm1";
+	// ids[2] = "Ogo2";
+	// ids[4] = "Vitya4";
+	// ids[5] = "Imarobot";
+
+	// например тут без доп методов и обработки будет выводиться все в рандомном
+	// порядке чтобы такого не происходило, нужно перезгрузить в файле .h
+	// шаблон, отвечающий за хэширование (.h, строка 164)
+
+	bmstu::unordered_map<double, std::string> ids;
+	ids[2.654] = "Sasha1";
+	ids[0.006666] = "Sasha2";
+	ids[2.5] = "Petya";
+	ids[2.55] = "Vasya";
+	ids[2.56] = "Kolya";
+	ids[2.65] = "Sasha3";
+
+	for (const auto& [k, v] : ids)
+	{
+		std::cout << "ID:" << k << " Name: " << v << std::endl;
+	}
+}
